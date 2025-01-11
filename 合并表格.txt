@@ -1,0 +1,222 @@
+// 添加自动执行事件处理
+function Workbook_Open() {
+    try {
+        let customMenu = Application.CommandBars.Add("表格合并工具", 1);
+        let menuItem = customMenu.Controls.Add(1);
+        menuItem.Caption = "合并表格";
+        menuItem.OnAction = "合并表格";
+        customMenu.Visible = true;
+    } catch (e) {
+        // 如果菜单已存在，忽略错误
+    }
+}
+
+function Workbook_BeforeClose() {
+    try {
+        Application.CommandBars("表格合并工具").Delete();
+    } catch (e) {
+        // 忽略错误
+    }
+    return true;
+}
+
+/**
+ * 检查文件类型是否支持
+ * @param {string} fileName 文件名
+ * @returns {string|null} 文件类型或null
+ */
+function getFileType(fileName) {
+    const supportedTypes = {
+        'xlsx': 'xlsx',
+        'xls': 'xls',
+        'csv': 'csv',
+        'et': 'et',    // WPS表格
+        'ets': 'ets',  // WPS加密表格
+        'xlt': 'xlt',  // Excel模板
+        'xml': 'xml'   // Excel XML格式
+    };
+    
+    const extension = fileName.split('.').pop().toLowerCase();
+    return supportedTypes[extension] || null;
+}
+
+/**
+ * 验证所选文件的类型一致性
+ * @param {FileDialogSelectedItems} files 选择的文件
+ * @returns {{isValid: boolean, type: string|null, message: string}} 验证结果
+ */
+function validateFileTypes(files) {
+    let firstType = null;
+    let result = {
+        isValid: true,
+        type: null,
+        message: ""
+    };
+
+    for (let i = 1; i <= files.Count; i++) {
+        let filePath = files.Item(i);
+        let fileName = filePath.split("\\").pop();
+        let currentType = getFileType(fileName);
+
+        if (!currentType) {
+            result.isValid = false;
+            result.message = `文件 "${fileName}" 格式不支持！\n支持的格式：xlsx, xls, csv, et, ets, xlt, xml`;
+            return result;
+        }
+
+        if (!firstType) {
+            firstType = currentType;
+        } else if (firstType !== currentType) {
+            result.isValid = false;
+            result.message = `文件类型不一致！\n"${fileName}" 为 ${currentType} 格式，而之前的文件为 ${firstType} 格式。\n请确保所有文件格式相同。`;
+            return result;
+        }
+    }
+
+    result.type = firstType;
+    return result;
+}
+
+/**
+ * 合并表格 Macro
+ */
+function 合并表格() {
+    // 打开文件选择对话框
+    let fileDialog = Application.FileDialog(3);
+    fileDialog.Title = "请选择需要合并的文件";
+    fileDialog.AllowMultiSelect = true;
+
+    // 清除所有默认过滤器
+    while (fileDialog.Filters.Count > 0) {
+        fileDialog.Filters.Delete(1);
+    }
+    
+    // 按照优先级添加过滤器
+    fileDialog.Filters.Add("所有支持的表格文件", "*.xlsx; *.xls; *.csv; *.et; *.ets; *.xlt; *.xml");
+    fileDialog.Filters.Add("Excel文件", "*.xlsx; *.xls; *.xlt");
+    fileDialog.Filters.Add("WPS表格", "*.et; *.ets");
+    fileDialog.Filters.Add("CSV文件", "*.csv");
+    fileDialog.Filters.Add("XML表格", "*.xml");
+
+    if (!fileDialog.Show()) {
+        alert("未选择任何文件！");
+        return;
+    }
+
+    let selectedFiles = fileDialog.SelectedItems;
+    if (selectedFiles.Count < 2) {
+        alert("请至少选择两个文件进行合并！");
+        return;
+    }
+
+    // 验证文件类型
+    let typeValidation = validateFileTypes(selectedFiles);
+    if (!typeValidation.isValid) {
+        alert(typeValidation.message);
+        return;
+    }
+
+    // 获取用户选择的文件夹路径
+    let selectedFolderPath = selectedFiles.Item(1).replace(/\\[^\\]*$/, "");
+
+    // 收集合并参数
+    let userChoice = Application.InputBox(
+        "请输入合并参数：\n\n" +
+        "格式：H数字 或 L数字\n" +
+        "示例：H1 - 按行合并,保留1行标题\n" +
+        "示例：L2 - 按列合并,保留2列标题", 
+        "合并设置",
+        "h1"
+    );
+    
+    if (!userChoice || userChoice === "False") {
+        return;
+    }
+
+    // 解析用户输入
+    userChoice = userChoice.toLowerCase().trim();
+    let match = userChoice.match(/^([hl])(\d+)$/);
+    if (!match) {
+        alert("格式错误！请使用h数字或l数字的格式。\n例如：h1 或 l2");
+        return;
+    }
+    
+    let [, mode, count] = match;
+    let mergeByRows = mode === 'h';
+    let skipRowsOrCols = parseInt(count);
+    
+    if (skipRowsOrCols < 0) {
+        alert("标题数量不能为负数！");
+        return;
+    }
+
+    // 创建新工作簿保存结果
+    let resultWorkbook = Application.Workbooks.Add();
+    let resultSheet = resultWorkbook.Worksheets.Item(1);
+    resultSheet.Name = "合并结果";
+
+    // 从第一个文件复制标题
+    let firstWb = Application.Workbooks.Open(selectedFiles.Item(1));
+    let firstSheet = firstWb.ActiveSheet;
+    let firstUsedRange = firstSheet.UsedRange;
+
+    if (mergeByRows) {
+        let headerRange = firstUsedRange.Rows(1).Resize(skipRowsOrCols, firstUsedRange.Columns.Count);
+        headerRange.Copy(resultSheet.Cells(1, 1));
+    } else {
+        let headerRange = firstUsedRange.Columns(1).Resize(firstUsedRange.Rows.Count, skipRowsOrCols);
+        headerRange.Copy(resultSheet.Cells(1, 1));
+    }
+
+    let nextPosition = skipRowsOrCols + 1;
+
+    // 合并所有选中的文件内容
+    for (let i = 1; i <= selectedFiles.Count; i++) {
+        let wb = i === 1 ? firstWb : Application.Workbooks.Open(selectedFiles.Item(i));
+        let sheet = wb.ActiveSheet;
+        let fileUsedRange = sheet.UsedRange;
+
+        try {
+            if (mergeByRows) {
+                let contentRange = fileUsedRange.Rows(skipRowsOrCols + 1).Resize(fileUsedRange.Rows.Count - skipRowsOrCols, fileUsedRange.Columns.Count);
+                contentRange.Copy(resultSheet.Cells(nextPosition, 1));
+                nextPosition += contentRange.Rows.Count;
+            } else {
+                let contentRange = fileUsedRange.Columns(skipRowsOrCols + 1).Resize(fileUsedRange.Rows.Count, fileUsedRange.Columns.Count - skipRowsOrCols);
+                contentRange.Copy(resultSheet.Cells(1, nextPosition));
+                nextPosition += contentRange.Columns.Count;
+            }
+        } catch (e) {
+            alert(`处理文件 "${wb.Name}" 时出错：\n${e.message}`);
+        }
+
+        if (i > 1) {  // 不要关闭第一个工作簿，因为后面还要用
+            wb.Close(false);
+        }
+    }
+
+    firstWb.Close(false);  // 最后关闭第一个工作簿
+
+    // 保存结果文件
+    let timestamp = new Date().toISOString().replace(/[:T]/g, "_").slice(0, 19);
+    let resultFilePath = selectedFolderPath + "\\合并结果_" + timestamp + "." + typeValidation.type;
+    
+    try {
+        switch (typeValidation.type) {
+            case 'csv':
+                resultWorkbook.SaveAs(resultFilePath, 6);  // xlCSV
+                break;
+            case 'xls':
+                resultWorkbook.SaveAs(resultFilePath, 56); // xlExcel8
+                break;
+            case 'xml':
+                resultWorkbook.SaveAs(resultFilePath, 46); // xlXMLSpreadsheet
+                break;
+            default:
+                resultWorkbook.SaveAs(resultFilePath); // 默认格式(xlsx等)
+        }
+        alert("合并完成！\n结果已保存到：" + resultFilePath);
+    } catch (e) {
+        alert("保存结果文件时出错：\n" + e.message);
+    }
+}
