@@ -1,6 +1,6 @@
-# WPS 表格合并工具
+# WPS/excel 表格合并工具
 
-一个 WPS 表格文件合并工具，支持按行或按列合并多个表格文件。
+一个表格文件合并工具，支持按行或按列合并多个表格文件。
 
 ## 功能特点
 
@@ -18,10 +18,16 @@
 - XML 表格 (.xml)
 
 ## 安装方法
-
-1. 保存 `表格合并工具.xlam` 文件；也可以复制 [合并表格.txt](https://github.com/Eva-Peter/Merge-Forms/blob/main/%E5%90%88%E5%B9%B6%E8%A1%A8%E6%A0%BC.txt) 的代码，在wps宏编辑器上粘贴并保存表格为 `xlam` 格式
-2. 点击 `工具->加载项->浏览->选择刚保存的文件->确定`（建议放在不易被删除的路径）
+### wps
+1. 保存 `合并表格wps.xlam` 文件；也可以复制 [合并表格wps.txt](https://github.com/Eva-Peter/Merge-Forms/blob/main/%E5%90%88%E5%B9%B6%E8%A1%A8%E6%A0%BCwps.txt) 的代码，在wps宏编辑器上粘贴并保存表格为 `xlam` 格式
+2. 点击 `工具->加载项->浏览->选择刚保存的文件->确定`（建议放在不易被删除的路径或wps默认路径）
 3. 此时顶部工具栏的 `加载项` 中应该多了一个 `合并表格` 的项
+### excel
+1. 保存 `合并表格excel.xlam` 文件；也可以复制 [合并表格excel.txt](https://github.com/Eva-Peter/Merge-Forms/blob/main/%E5%90%88%E5%B9%B6%E8%A1%A8%E6%A0%BCexcel.txt) 的代码，在excel宏编辑器上粘贴并保存为 `xlam` 格式
+   - 宏编辑器打开方式：`开发工具->Visual Basic->左侧找到VBA Project(工作簿1)->插入模块->弹出宏编辑窗口`
+2. 点击 `开发工具->Excel加载项->浏览->选择刚保存的文件->确定`（建议放在不易被删除的路径或excel默认路径）
+3. 此时加载项中应多出了 `合并表单` 的选项
+   - 若没出现，建议在 `文件->选项->快速访问工具栏->选择“宏”->MergeExcelSheets->添加->确定` 添加 
 
 ## 使用说明
 
