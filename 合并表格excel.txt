@@ -1,0 +1,372 @@
+Option Explicit
+
+' 合并表单主函数
+Sub MergeExcelSheets()
+    Dim fd As FileDialog
+    Dim selectedPath As Variant
+    Dim skipInput As String
+    Dim skipRows As Long, skipCols As Long
+    Dim firstFile As String
+    Dim wb As Workbook
+    Dim wsTarget As Worksheet
+    Dim lastRow As Long, lastCol As Long
+    Dim fileName As String
+    Dim timeStamp As String
+    Dim fileExtension As String
+    Dim titleRange As Range
+    Dim isCSV As Boolean
+    
+    ' 关闭屏幕更新以减少闪烁
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    
+    On Error GoTo ErrorHandler
+    
+    ' 创建文件选择对话框
+    Set fd = Application.FileDialog(msoFileDialogFilePicker)
+    With fd
+        .Title = "选择要合并的文件"
+        .Filters.Clear
+        .Filters.Add "支持的文件类型", "*.xlsx; *.xls; *.xlt; *.et; *.ets; *.csv; *.xml"
+        .AllowMultiSelect = True
+        
+        If .Show = False Then
+            MsgBox "未选择任何文件", vbInformation
+            GoTo CleanExit
+        End If
+        
+        ' 获取用户输入的跳过设置，默认值为H0
+        skipInput = InputBox("请输入合并方式：" & vbNewLine & _
+                           "Hn：按行合并，保留前n行作为标题" & vbNewLine & _
+                           "Ln：按列合并，保留前n列作为标题" & vbNewLine & _
+                           "默认H0表示不考虑标题", "合并设置", "H0")
+        
+        ' 检查第一个文件是否为CSV
+        firstFile = .SelectedItems(1)
+        isCSV = (LCase(Right(firstFile, 4)) = ".csv")
+        
+        ' 解析跳过设置
+        Call ParseSkipInput(skipInput, skipRows, skipCols)
+        
+        ' 创建新工作簿用于存储合并结果
+        Set wb = Workbooks.Add
+        Set wsTarget = wb.Sheets(1)
+        wsTarget.Name = "合并结果"
+        
+        ' 处理所有文件
+        If skipCols > 0 Then
+            ' 按列合并（保留标题列）
+            Call MergeByColumns(.SelectedItems, wsTarget, skipCols)
+        Else
+            ' 按行合并（包含H0和L0的情况）
+            Call MergeByRows(.SelectedItems, wsTarget, skipRows)
+        End If
+        
+        ' 保存结果
+        timeStamp = Format(Now, "yyyymmdd_hhmmss")
+        
+        ' 根据源文件类型决定保存格式
+        If isCSV Then
+            ' 如果源文件是CSV，先保存为CSV格式
+            fileName = Left(firstFile, InStrRev(firstFile, "\")) & "合并结果_" & timeStamp & ".csv"
+            wb.SaveAs fileName, xlCSV
+        Else
+            ' 其他格式保存为xlsx
+            fileName = Left(firstFile, InStrRev(firstFile, "\")) & "合并结果_" & timeStamp & ".xlsx"
+            wb.SaveAs fileName, xlOpenXMLWorkbook
+        End If
+        
+        wb.Close
+        
+        ' 打开合并后的文件
+        On Error Resume Next
+        Workbooks.Open fileName
+        If Err.Number <> 0 Then
+            MsgBox "文件已保存，但无法自动打开。请手动打开文件：" & vbNewLine & fileName, vbInformation
+        Else
+            MsgBox "文件已合并并打开：" & vbNewLine & fileName, vbInformation
+        End If
+        On Error GoTo ErrorHandler  ' 恢复错误处理
+        
+    End With
+
+CleanExit:
+    ' 恢复屏幕更新
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    Exit Sub
+
+ErrorHandler:
+    MsgBox "处理过程中出现错误: " & Err.Description, vbCritical
+    Resume CleanExit
+End Sub
+
+' 检查工作表是否为空
+Private Function IsWorksheetEmpty(ws As Worksheet) As Boolean
+    IsWorksheetEmpty = False
+    If ws.UsedRange.Address = "$A$1" Then
+        If IsEmpty(ws.Range("A1").Value) Then
+            IsWorksheetEmpty = True
+        End If
+    End If
+End Function
+
+' 按行合并（保留标题行）
+Private Sub MergeByRows(files As Variant, wsTarget As Worksheet, titleRows As Long)
+    Dim wbSource As Workbook
+    Dim wsSource As Worksheet
+    Dim titleRange As Range
+    Dim dataRange As Range
+    Dim targetRow As Long
+    Dim i As Long
+    Dim totalRows As Long
+    Dim skippedFiles As String
+    
+    skippedFiles = ""
+    
+    ' 处理第一个文件
+    Set wbSource = Workbooks.Open(files(1), ReadOnly:=True)
+    Set wsSource = wbSource.Sheets(1)
+    
+    ' 检查第一个文件是否为空
+    If IsWorksheetEmpty(wsSource) Then
+        wbSource.Close False
+        MsgBox "第一个文件为空，无法继续合并操作", vbExclamation
+        Exit Sub
+    End If
+    
+    ' 获取总行数
+    totalRows = wsSource.UsedRange.Rows.Count
+    
+    ' 检查标题行数是否超过总行数
+    If titleRows >= totalRows And titleRows > 0 Then
+        MsgBox "标题行数不能大于或等于总行数，将使用总行数-1作为标题行数", vbExclamation
+        titleRows = totalRows - 1
+    End If
+    
+    If titleRows > 0 Then
+        ' 有标题行时的处理
+        ' 复制标题行
+        Set titleRange = wsSource.Range(wsSource.Cells(1, 1), wsSource.Cells(titleRows, wsSource.UsedRange.Columns.Count))
+        titleRange.Copy wsTarget.Range("A1")
+        
+        ' 复制第一个文件的数据（如果有）
+        If titleRows < totalRows Then
+            Set dataRange = wsSource.Range( _
+                wsSource.Cells(titleRows + 1, 1), _
+                wsSource.Cells(totalRows, wsSource.UsedRange.Columns.Count))
+            dataRange.Copy wsTarget.Cells(titleRows + 1, 1)
+        End If
+    Else
+        ' 无标题行时直接复制全部内容
+        wsSource.UsedRange.Copy wsTarget.Range("A1")
+    End If
+    
+    wbSource.Close False
+    
+    ' 处理其余文件
+    targetRow = wsTarget.Cells(wsTarget.Rows.Count, "A").End(xlUp).Row + 1
+    
+    For i = 2 To files.Count
+        Set wbSource = Workbooks.Open(files(i), ReadOnly:=True)
+        Set wsSource = wbSource.Sheets(1)
+        
+        ' 检查工作表是否为空
+        If IsWorksheetEmpty(wsSource) Then
+            skippedFiles = skippedFiles & vbNewLine & files(i)
+            wbSource.Close False
+            GoTo NextFile
+        End If
+        
+        totalRows = wsSource.UsedRange.Rows.Count
+        
+        If titleRows > 0 Then
+            ' 有标题行时跳过标题
+            If titleRows < totalRows Then
+                Set dataRange = wsSource.Range( _
+                    wsSource.Cells(titleRows + 1, 1), _
+                    wsSource.Cells(totalRows, wsSource.UsedRange.Columns.Count))
+                dataRange.Copy wsTarget.Cells(targetRow, 1)
+            End If
+        Else
+            ' 无标题行时复制全部内容
+            wsSource.UsedRange.Copy wsTarget.Cells(targetRow, 1)
+        End If
+        
+        targetRow = wsTarget.Cells(wsTarget.Rows.Count, "A").End(xlUp).Row + 1
+        wbSource.Close False
+NextFile:
+    Next i
+    
+    ' 如果有跳过的文件，显示提示
+    If skippedFiles <> "" Then
+        MsgBox "以下空文件已被跳过：" & skippedFiles, vbInformation
+    End If
+End Sub
+
+' 按列合并（保留标题列）
+Private Sub MergeByColumns(files As Variant, wsTarget As Worksheet, titleCols As Long)
+    Dim wbSource As Workbook
+    Dim wsSource As Worksheet
+    Dim titleRange As Range
+    Dim dataRange As Range
+    Dim targetCol As Long
+    Dim i As Long
+    Dim totalColumns As Long
+    Dim skippedFiles As String
+    
+    skippedFiles = ""
+    
+    ' 处理第一个文件
+    Set wbSource = Workbooks.Open(files(1), ReadOnly:=True)
+    Set wsSource = wbSource.Sheets(1)
+    
+    ' 检查第一个文件是否为空
+    If IsWorksheetEmpty(wsSource) Then
+        wbSource.Close False
+        MsgBox "第一个文件为空，无法继续合并操作", vbExclamation
+        Exit Sub
+    End If
+    
+    ' 获取总列数
+    totalColumns = wsSource.UsedRange.Columns.Count
+    
+    ' 检查标题列数是否超过总列数
+    If titleCols >= totalColumns Then
+        MsgBox "标题列数不能大于或等于总列数，将使用总列数-1作为标题列数", vbExclamation
+        titleCols = totalColumns - 1
+    End If
+    
+    ' 复制标题列
+    Set titleRange = wsSource.Range( _
+        wsSource.Cells(1, 1), _
+        wsSource.Cells(wsSource.UsedRange.Rows.Count, titleCols))
+    titleRange.Copy wsTarget.Range("A1")
+    
+    ' 复制第一个文件的数据（如果有）
+    If titleCols < totalColumns Then
+        Set dataRange = wsSource.Range( _
+            wsSource.Cells(1, titleCols + 1), _
+            wsSource.Cells(wsSource.UsedRange.Rows.Count, totalColumns))
+        dataRange.Copy wsTarget.Cells(1, titleCols + 1)
+    End If
+    
+    wbSource.Close False
+    
+    ' 处理其余文件
+    targetCol = wsTarget.Cells(1, wsTarget.Columns.Count).End(xlToLeft).Column + 1
+    
+    For i = 2 To files.Count
+        Set wbSource = Workbooks.Open(files(i), ReadOnly:=True)
+        Set wsSource = wbSource.Sheets(1)
+        
+        ' 检查工作表是否为空
+        If IsWorksheetEmpty(wsSource) Then
+            skippedFiles = skippedFiles & vbNewLine & files(i)
+            wbSource.Close False
+            GoTo NextFile
+        End If
+        
+        totalColumns = wsSource.UsedRange.Columns.Count
+        
+        ' 只复制数据部分（跳过标题列）
+        If titleCols < totalColumns Then
+            Set dataRange = wsSource.Range( _
+                wsSource.Cells(1, titleCols + 1), _
+                wsSource.Cells(wsSource.UsedRange.Rows.Count, totalColumns))
+            
+            dataRange.Copy wsTarget.Cells(1, targetCol)
+            targetCol = wsTarget.Cells(1, wsTarget.Columns.Count).End(xlToLeft).Column + 1
+        End If
+        
+        wbSource.Close False
+NextFile:
+    Next i
+    
+    ' 如果有跳过的文件，显示提示
+    If skippedFiles <> "" Then
+        MsgBox "以下空文件已被跳过：" & skippedFiles, vbInformation
+    End If
+End Sub
+
+' 获取文件扩展名
+Private Function GetFileExtension(filePath As String) As String
+    Dim ext As String
+    ext = LCase(Right(filePath, Len(filePath) - InStrRev(filePath, ".")))
+    Select Case ext
+        Case "xlsx", "xls", "xlt", "et", "ets"
+            GetFileExtension = ".xlsx"
+        Case "csv"
+            GetFileExtension = ".csv"
+        Case "xml"
+            GetFileExtension = ".xml"
+        Case Else
+            GetFileExtension = ".xlsx"
+    End Select
+End Function
+
+' 解析跳过设置
+Private Sub ParseSkipInput(ByVal skipInput As String, ByRef skipRows As Long, ByRef skipCols As Long)
+    Dim firstChar As String
+    Dim numberPart As String
+    Dim numberValue As Long
+    
+    skipRows = 0
+    skipCols = 0
+    
+    If Trim(skipInput) = "" Then 
+        skipInput = "H0"  ' 如果用户直接点击取消，也使用默认值
+    End If
+    
+    firstChar = UCase(Left(Trim(skipInput), 1))  ' 转换为大写以忽略大小写
+    numberPart = Mid(Trim(skipInput), 2)
+    
+    ' 检查数字部分是否为有效数字
+    If Not IsNumeric(numberPart) Then
+        MsgBox "合并设置格式不正确，将使用默认值H0", vbExclamation
+        skipInput = "H0"
+        numberValue = 0
+    Else
+        numberValue = CLng(numberPart)
+        ' 检查数字是否为负数或过大
+        If numberValue < 0 Or numberValue > 1000 Then  ' 设置一个合理的上限
+            MsgBox "行数或列数必须是0-1000之间的数字，将使用默认值H0", vbExclamation
+            skipInput = "H0"
+            numberValue = 0
+        End If
+    End If
+    
+    Select Case firstChar
+        Case "H", "h"  ' 同时处理大小写
+            skipRows = numberValue
+        Case "L", "l"  ' 同时处理大小写
+            If numberValue = 0 Then
+                ' L0 和 H0 效果相同，都是不保留标题直接合并
+                skipRows = 0
+            Else
+                skipCols = numberValue
+            End If
+        Case Else
+            MsgBox "合并设置的首字母必须为H或L，将使用默认值H0", vbExclamation
+            skipRows = 0
+    End Select
+End Sub
+
+' 添加功能按钮到功能区
+Sub AddMergeButton()
+    Dim customGroup As CommandBarControl
+    Dim btn As CommandBarButton
+    
+    On Error Resume Next
+    Set customGroup = Application.CommandBars("Worksheet Menu Bar").Controls.Add(Type:=msoControlButton)
+    If Err.Number <> 0 Then
+        MsgBox "无法添加功能按钮", vbCritical
+        Exit Sub
+    End If
+    
+    With customGroup
+        .Caption = "合并表单"
+        .OnAction = "MergeExcelSheets"
+        .Style = msoButtonCaption
+    End With
+End Sub
